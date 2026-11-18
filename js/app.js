@@ -60,8 +60,11 @@
   let clickBufs = null;
   function makeClicks(c) {
     const sr = c.sampleRate;
-    // [Grundton, Lautstärke, Ausklingzeit]: Betonung höher, alle kräftig
-    return [[2000, 1.0, 0.11], [1650, 0.92, 0.09], [1400, 0.88, 0.09]].map(([f, peak, len]) => {
+    // Gestimmte Töne nach dem Kammerton: Betonung a³, übrige Schläge e³ (reine Quarte darunter)
+    const A6 = a4 * 4;                        // a³ = 1760 Hz bei 440
+    const E6 = a4 * 4 * Math.pow(2, -5 / 12);  // e³ = 1318,5 Hz bei 440
+    // [Tonhöhe, Lautstärke, Ausklingzeit]
+    return [[A6, 1.0, 0.11], [E6, 0.95, 0.10], [E6, 0.85, 0.10]].map(([f, peak, len]) => {
       const n = Math.floor(sr * (len + 0.02));
       const b = c.createBuffer(1, n, sr);
       const d = b.getChannelData(0);
@@ -70,18 +73,17 @@
       const noise = () => { seed = (seed * 16807) % 2147483647; return seed / 1073741823.5 - 1; };
       for (let i = 0; i < n; i++) {
         const t = i / sr;
-        // Holzblock-artig: Grundton + Obertöne (2x, 3x, 4,2x), die oberen klingen schneller ab
+        // nur harmonische Obertöne → klare, saubere Tonhöhe
         let x = Math.sin(2 * Math.PI * f * t)
-              + 0.6 * Math.sin(2 * Math.PI * f * 2 * t) * Math.exp(-t / (len * 0.35))
-              + 0.35 * Math.sin(2 * Math.PI * f * 3 * t) * Math.exp(-t / (len * 0.2))
-              + 0.25 * Math.sin(2 * Math.PI * f * 4.2 * t) * Math.exp(-t / (len * 0.12));
+              + 0.45 * Math.sin(2 * Math.PI * f * 2 * t) * Math.exp(-t / (len * 0.3))
+              + 0.2 * Math.sin(2 * Math.PI * f * 3 * t) * Math.exp(-t / (len * 0.18));
         x *= Math.exp(-t / (len * 0.3));
-        x += 0.5 * noise() * Math.exp(-t / 0.002); // kurzer Anschlag
+        x += 0.35 * noise() * Math.exp(-t / 0.0015); // kurzer Anschlag
         d[i] = i < atk ? x * (i / atk) : x;
       }
       // sanft begrenzen und auf volle Lautstärke bringen
       let max = 0;
-      for (let i = 0; i < n; i++) { d[i] = Math.tanh(1.6 * d[i]); max = Math.max(max, Math.abs(d[i])); }
+      for (let i = 0; i < n; i++) { d[i] = Math.tanh(1.4 * d[i]); max = Math.max(max, Math.abs(d[i])); }
       const g = (peak * 0.98) / max;
       for (let i = 0; i < n; i++) d[i] *= g;
       return b;
@@ -556,6 +558,7 @@
   function showA4() { a4Val.textContent = a4 + " Hz"; }
   function stepA4(d) {
     a4 = clamp(a4 + d, 430, 450); store.set("a4", a4); showA4();
+    if (d) clickBufs = makeClicks(ctx); // Metronom-Töne mitstimmen
     $("#a4-down").disabled = a4 <= 430; $("#a4-up").disabled = a4 >= 450;
   }
   showA4(); stepA4(0);
