@@ -442,7 +442,7 @@
     let rms = 0;
     for (let i = 0; i < buf.length; i++) rms += buf[i] * buf[i];
     rms = Math.sqrt(rms / buf.length);
-    if (rms < 0.006) return -1;
+    if (rms < 0.003) return -1; // auch leisen Gesang erfassen
     const tauMin = Math.floor(sr / 2000);
     const tauMax = Math.min(Math.floor(sr / 38), Math.floor(buf.length / 2));
     const W = buf.length - tauMax;
@@ -458,7 +458,7 @@
     }
     let tau = -1;
     for (let t = tauMin; t <= tauMax; t++) {
-      if (d[t] < 0.13) {
+      if (d[t] < 0.18) { // etwas toleranter für Stimme (Hauchen, Vibrato)
         while (t + 1 <= tauMax && d[t + 1] < d[t]) t++;
         tau = t; break;
       }
@@ -499,6 +499,7 @@
         const md = median(jumpBuf);
         if (jumpBuf.slice(-4).every((v) => Math.abs(v - md) < 0.35)) { sm = md; recent = [md]; jumpBuf = []; }
       }
+      lastHeard = now; // es klingt weiterhin etwas – Anzeige nicht abschalten
       return;
     } else {
       jumpBuf = [];
@@ -523,8 +524,9 @@
       if (f > 0) feed(f, now);
     }
 
-    const active = sm !== null && now - lastHeard < 1200;
-    if (sm !== null && now - lastHeard > 4000) { resetTuner(); }
+    // Anzeige bleibt 3,5 s nach dem letzten erkannten Ton aktiv, der Ton selbst bleibt 10 s stehen
+    const active = sm !== null && now - lastHeard < 3500;
+    if (sm !== null && now - lastHeard > 10000) { resetTuner(); }
 
     let targetCents = 0;
     if (sm !== null) {
