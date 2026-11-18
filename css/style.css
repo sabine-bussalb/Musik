@@ -14,6 +14,22 @@
   --safe-l: env(safe-area-inset-left, 0px);
   --tabbar-h: 58px;
 }
+body[data-theme="blau"] {
+  --bg: #E7F1FB;
+  --btn: #CCE0F5;
+  --btn-press: #B7D2EF;
+  --accent: #1E4A8A;
+  --accent-ink: #ffffff;
+  --ink: #142B4A;
+  --muted: #4D6584;
+  --line: #B8D0EC;
+  --key-down: #DCEAF9;
+  --key-down-2: #CFE2F6;
+  --key-down-edge: #B7D2EF;
+  --black-down: #2B5BA3;
+  --black-down-2: #1E4A8A;
+  --black-down-edge: #163A6E;
+}
 body[data-theme="flieder"] {
   --bg: #F3EEFB;
   --btn: #E2D7F3;
@@ -137,8 +153,8 @@ button { font: inherit; color: inherit; border: 0; background: none; padding: 0;
   z-index: 1;
 }
 .key.white.down {
-  background: linear-gradient(#EEE7FA 0%, #E6DCF7 100%);
-  box-shadow: inset 0 -2px 0 #D6C8F0, inset -1px 0 0 #CDBFE6;
+  background: linear-gradient(var(--key-down, #EEE7FA) 0%, var(--key-down-2, #E6DCF7) 100%);
+  box-shadow: inset 0 -2px 0 var(--key-down-edge, #D6C8F0), inset -1px 0 0 var(--key-down-edge, #CDBFE6);
 }
 .key.black {
   height: 61%;
@@ -149,8 +165,8 @@ button { font: inherit; color: inherit; border: 0; background: none; padding: 0;
   z-index: 2;
 }
 .key.black.down {
-  background: linear-gradient(#5A4590 0%, #4A3780 100%);
-  box-shadow: 0 1px 2px rgba(0,0,0,.35), inset 0 -2px 0 #36285E;
+  background: linear-gradient(var(--black-down, #5A4590) 0%, var(--black-down-2, #4A3780) 100%);
+  box-shadow: 0 1px 2px rgba(0,0,0,.35), inset 0 -2px 0 var(--black-down-edge, #36285E);
 }
 .key .label {
   font-weight: 600; line-height: 1;
@@ -206,6 +222,10 @@ body.names-off .key .label { visibility: hidden; }
   min-height: 40px; display: inline-flex; align-items: center;
   transition: background-color .3s ease, color .3s ease;
 }
+/* Stimmgerät: Statusanzeige und −/+ in dunklerem Lila */
+.tuner .tuner-status { background: var(--accent); color: var(--accent-ink); }
+.tuner .a4-row .btn { background: var(--accent); color: var(--accent-ink); }
+.tuner .a4-row .btn:active, .tuner .a4-row .btn.pressed { background: #664BB3; }
 .tuner.ok .tuner-status { background: var(--ok); color: #fff; }
 .tuner.warn .tuner-status { background: var(--warn); color: #fff; }
 .tuner.ok .tuner-note { color: var(--ok); }

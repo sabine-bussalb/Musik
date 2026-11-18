@@ -665,7 +665,7 @@
   buildDots();
 
   // ================================================================ ANSICHTEN
-  const THEMES = { klavier: ["flieder", "#F3EEFB"], stimmgeraet: ["flieder", "#F3EEFB"], metronom: ["petrol", "#E6F1F3"] };
+  const THEMES = { klavier: ["blau", "#E7F1FB"], stimmgeraet: ["flieder", "#F3EEFB"], metronom: ["petrol", "#E6F1F3"] };
   let currentView = null;
   function showView(name, fromGesture) {
     if (!THEMES[name]) name = "klavier";
