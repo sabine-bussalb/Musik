@@ -637,6 +637,19 @@
 
   showView(store.get("tab", "klavier"), false);
 
+  // ================================================================ HÖHE
+  // Safari zeigt im Hochformat unten eine Leiste – die App passt sich der sichtbaren Höhe an,
+  // damit die Knöpfe unten immer sichtbar und antippbar bleiben.
+  function fitHeight() {
+    const h = Math.round(window.visualViewport ? Math.min(window.visualViewport.height, window.innerHeight) : window.innerHeight);
+    if (h > 0) document.documentElement.style.setProperty("--app-h", h + "px");
+    window.scrollTo(0, 0);
+  }
+  fitHeight();
+  window.addEventListener("resize", fitHeight);
+  window.addEventListener("orientationchange", () => { fitHeight(); setTimeout(fitHeight, 300); setTimeout(fitHeight, 800); });
+  if (window.visualViewport) window.visualViewport.addEventListener("resize", fitHeight);
+
   // ================================================================ OFFLINE
   if ("serviceWorker" in navigator && location.protocol !== "file:") {
     window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
