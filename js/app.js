@@ -53,28 +53,44 @@
     metroBus = ctx.createGain(); metroBus.gain.value = 0.9; metroBus.connect(master);
     unlocked = false;
     needsRebuild = false;
+    clickBufs = makeClicks(ctx);
+  }
+
+  // Metronom-Klicks einmal vorberechnen (leichter als Oszillatoren pro Schlag)
+  let clickBufs = null;
+  function makeClicks(c) {
+    const sr = c.sampleRate;
+    return [[1760, 1.0, 0.075], [1320, 0.75, 0.055], [1000, 0.6, 0.055]].map(([f, peak, len]) => {
+      const n = Math.floor(sr * (len + 0.01));
+      const b = c.createBuffer(1, n, sr);
+      const d = b.getChannelData(0);
+      const atk = sr * 0.0015, k = Math.log(peak / 0.0008) / (sr * len);
+      for (let i = 0; i < n; i++) {
+        const env = i < atk ? (i / atk) * peak : peak * Math.exp(-k * (i - atk));
+        d[i] = Math.sin(2 * Math.PI * f * i / sr) * env;
+      }
+      return b;
+    });
   }
   buildAudio();
 
+  let lastRebuild = -Infinity;
   function rebuildAudio() {
-    if (typeof stopMetro === "function" && running) stopMetro();
+    const now = performance.now();
+    if (now - lastRebuild < 3000) return; // nie in schneller Folge neu aufbauen
+    lastRebuild = now;
     voices.clear();
     const old = ctx;
     buildAudio();
-    try { old.close(); } catch { /* */ }
+    try { const p = old.close(); if (p && p.catch) p.catch(() => {}); } catch { /* */ }
   }
 
   /** Bei jeder Berührung aufrufen: hält die Tonausgabe am Leben (iOS). */
   function unlockAudio() {
-    if (needsRebuild || ctx.state === "closed" || ctx.state === "interrupted") {
-      if (!running) rebuildAudio();
-    }
-    if (ctx.state !== "running") {
-      const c = ctx;
-      c.resume().catch(() => {});
-      // Startet der Kontext nicht, beim nächsten Antippen neu aufbauen
-      setTimeout(() => { if (c === ctx && c.state !== "running" && !document.hidden) needsRebuild = true; }, 600);
-    }
+    // Neu aufbauen nur nach Mikrofonbenutzung oder wenn der Kontext geschlossen ist –
+    // und nie, während das Metronom läuft.
+    if ((needsRebuild || ctx.state === "closed") && !running) rebuildAudio();
+    if (ctx.state !== "running") ctx.resume().catch(() => {});
     if (!unlocked) {
       unlocked = true;
       const b = ctx.createBuffer(1, 1, ctx.sampleRate);
@@ -529,28 +545,30 @@
     b.addEventListener("click", () => { meter = +b.dataset.meter; store.set("meter", meter); buildDots(); resetBeat = true; });
   });
 
+  let pending = []; // geplante, evtl. noch nicht gespielte Klicks
   function click(t, kind) {
-    const o = ctx.createOscillator(), g = ctx.createGain();
-    const f = kind === 0 ? 1760 : kind === 1 ? 1320 : 1000;
-    const peak = kind === 0 ? 1.0 : kind === 1 ? 0.75 : 0.6;
-    o.type = "sine";
-    o.frequency.setValueAtTime(f, t);
-    g.gain.setValueAtTime(0, t);
-    g.gain.linearRampToValueAtTime(peak, t + 0.0015);
-    g.gain.exponentialRampToValueAtTime(0.0008, t + (kind === 0 ? 0.075 : 0.055));
-    o.connect(g); g.connect(metroBus);
-    o.start(t); o.stop(t + 0.1);
-    o.onended = () => { try { g.disconnect(); } catch { /* */ } };
+    const s = ctx.createBufferSource();
+    s.buffer = clickBufs[kind];
+    s.connect(metroBus);
+    s.start(t);
+    pending.push(s);
+    s.onended = () => { const i = pending.indexOf(s); if (i >= 0) pending.splice(i, 1); try { s.disconnect(); } catch { /* */ } };
   }
 
   function schedule() {
     if (!running) return;
-    const ahead = ctx.currentTime + 0.12;
-    while (nextTime < ahead) {
+    const now = ctx.currentTime;
+    // Hinkt der Zeitplan hinterher (App war blockiert/im Hintergrund), nicht nachholen,
+    // sondern ab jetzt weiterzählen – sonst gäbe es eine Klick-Lawine.
+    if (nextTime < now - 0.05) nextTime = now + 0.05;
+    const ahead = now + 0.12;
+    let guard = 0;
+    while (nextTime < ahead && guard++ < 4) {
       if (resetBeat) { beat = 0; resetBeat = false; }
       const kind = beat === 0 ? 0 : (meter === 6 && beat === 3) ? 1 : 2;
       click(nextTime, kind);
       queue.push({ t: nextTime, beat, dur: 60 / bpm });
+      if (queue.length > 16) queue.shift();
       nextTime += 60 / bpm;
       beat = (beat + 1) % meter;
     }
@@ -596,6 +614,9 @@
   function stopMetro() {
     running = false;
     ticker.postMessage("stop");
+    // schon geplante Klicks sofort abbrechen
+    for (const s of pending) { try { s.stop(0); s.disconnect(); } catch { /* */ } }
+    pending = [];
     cancelAnimationFrame(metroRAF);
     queue = [];
     $$(".dot", dotsEl).forEach((d) => d.classList.remove("on"));
