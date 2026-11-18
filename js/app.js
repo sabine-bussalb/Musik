@@ -60,11 +60,11 @@
   let clickBufs = null;
   function makeClicks(c) {
     const sr = c.sampleRate;
-    // Gestimmte Töne nach dem Kammerton: Betonung a³, übrige Schläge e³ (reine Quarte darunter)
-    const A6 = a4 * 4;                        // a³ = 1760 Hz bei 440
-    const E6 = a4 * 4 * Math.pow(2, -5 / 12);  // e³ = 1318,5 Hz bei 440
+    // Gestimmte Töne nach dem Kammerton: Betonung a³, übrige Schläge a² (Oktave darunter)
+    const A6 = a4 * 4; // a³ = 1760 Hz bei 440
+    const A5 = a4 * 2; // a² = 880 Hz bei 440
     // [Tonhöhe, Lautstärke, Ausklingzeit]
-    return [[A6, 1.0, 0.11], [E6, 0.95, 0.10], [E6, 0.85, 0.10]].map(([f, peak, len]) => {
+    return [[A6, 1.0, 0.11], [A5, 0.95, 0.10], [A5, 0.85, 0.10]].map(([f, peak, len]) => {
       const n = Math.floor(sr * (len + 0.02));
       const b = c.createBuffer(1, n, sr);
       const d = b.getChannelData(0);
