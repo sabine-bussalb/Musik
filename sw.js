@@ -1,5 +1,5 @@
 /* Offline-Cache für Musik */
-const CACHE = "musik-v6";
+const CACHE = "musik-v7";
 const FILES = [
   "./",
   "index.html",
@@ -45,8 +45,19 @@ const FILES = [
   "samples/Fs7.mp3",
 ];
 
+// Beim Installieren alles frisch vom Server holen (nicht aus dem Browser-Zwischenspeicher!)
 self.addEventListener("install", (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES)).then(() => self.skipWaiting()));
+  e.waitUntil((async () => {
+    const c = await caches.open(CACHE);
+    await Promise.all(FILES.map(async (f) => {
+      const url = new URL(f, self.registration.scope).href;
+      const bust = url + (url.includes("?") ? "&" : "?") + "v=" + CACHE;
+      const res = await fetch(new Request(bust, { cache: "reload" }));
+      if (!res.ok) throw new Error(f + ": " + res.status);
+      await c.put(url, res);
+    }));
+    await self.skipWaiting();
+  })());
 });
 
 self.addEventListener("activate", (e) => {
@@ -57,16 +68,37 @@ self.addEventListener("activate", (e) => {
   );
 });
 
+// App-Dateien (Seite, CSS, JS): zuerst Netz, damit Änderungen sofort ankommen; offline aus dem Speicher.
+// Klänge, Schrift, Icons: zuerst Speicher (ändern sich nie).
+const isShell = (url, req) =>
+  req.mode === "navigate" || /\.(html|css|js|webmanifest)$/.test(url.pathname) || url.pathname.endsWith("/");
+
 self.addEventListener("fetch", (e) => {
   const req = e.request;
-  if (req.method !== "GET" || new URL(req.url).origin !== location.origin) return;
-  e.respondWith(
-    caches.match(req, { ignoreSearch: true }).then((hit) => {
-      if (hit) return hit;
-      return fetch(req).then((res) => {
+  const url = new URL(req.url);
+  if (req.method !== "GET" || url.origin !== location.origin) return;
+
+  if (isShell(url, req)) {
+    e.respondWith((async () => {
+      try {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 3000);
+        const res = await fetch(new Request(req, { cache: "no-cache", signal: ctrl.signal }));
+        clearTimeout(timer);
         if (res.ok) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(req, copy)); }
         return res;
-      }).catch(() => (req.mode === "navigate" ? caches.match("index.html") : Response.error()));
-    })
+      } catch {
+        return (await caches.match(req, { ignoreSearch: true })) ||
+               (await caches.match("index.html", { ignoreSearch: true })) || Response.error();
+      }
+    })());
+    return;
+  }
+
+  e.respondWith(
+    caches.match(req, { ignoreSearch: true }).then((hit) => hit || fetch(req).then((res) => {
+      if (res.ok) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(req, copy)); }
+      return res;
+    }))
   );
 });

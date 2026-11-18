@@ -717,6 +717,19 @@
 
   // ================================================================ OFFLINE
   if ("serviceWorker" in navigator && location.protocol !== "file:") {
-    window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).then((reg) => {
+        // bei jedem Zurückkehren in die App nach einer neuen Version schauen
+        document.addEventListener("visibilitychange", () => { if (!document.hidden) reg.update().catch(() => {}); });
+      }).catch(() => {});
+    });
+    // Neue Version aktiv → einmal neu laden (nicht, während das Metronom läuft)
+    const hadController = !!navigator.serviceWorker.controller;
+    let reloaded = false;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (!hadController || reloaded) return;
+      reloaded = true;
+      if (!running) location.reload();
+    });
   }
 })();
