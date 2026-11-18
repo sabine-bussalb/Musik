@@ -77,20 +77,50 @@
   let lastRebuild = -Infinity;
   function rebuildAudio() {
     const now = performance.now();
-    if (now - lastRebuild < 3000) return; // nie in schneller Folge neu aufbauen
+    if (now - lastRebuild < 1500) return false; // nie in schneller Folge neu aufbauen
     lastRebuild = now;
     voices.clear();
     const old = ctx;
     buildAudio();
     try { const p = old.close(); if (p && p.catch) p.catch(() => {}); } catch { /* */ }
+    return true;
+  }
+
+  // Gesundheitscheck: iOS lässt die Tonausgabe nach Unterbrechungen manchmal stumm,
+  // obwohl sie „läuft“. Dann steht die Audio-Uhr still. Erkennen → beim nächsten Tippen neu aufbauen
+  // (höchstens 3 Versuche hintereinander, damit es nie zu einer Endlosschleife kommt).
+  let lastCheck = 0, failCount = 0;
+  function checkHealth() {
+    const now = performance.now();
+    if (now - lastCheck < 400) return;
+    lastCheck = now;
+    const c = ctx, t0 = c.currentTime;
+    setTimeout(() => {
+      if (c !== ctx || document.hidden) return;
+      const ok = c.state === "running" && c.currentTime > t0 + 0.2;
+      if (ok) failCount = 0;
+      else if (failCount < 3) { failCount++; needsRebuild = true; }
+    }, 500);
   }
 
   /** Bei jeder Berührung aufrufen: hält die Tonausgabe am Leben (iOS). */
+  let inUnlock = false;
   function unlockAudio() {
-    // Neu aufbauen nur nach Mikrofonbenutzung oder wenn der Kontext geschlossen ist –
-    // und nie, während das Metronom läuft.
-    if ((needsRebuild || ctx.state === "closed") && !running) rebuildAudio();
+    if (inUnlock) return;
+    inUnlock = true;
+    try { unlockInner(); } finally { inUnlock = false; }
+  }
+  function unlockInner() {
+    // Neu aufbauen: nach Mikrofonbenutzung, nach Rückkehr aus dem Hintergrund,
+    // wenn der Kontext geschlossen ist oder der Gesundheitscheck angeschlagen hat.
+    if ((needsRebuild || ctx.state === "closed") && performance.now() - lastRebuild >= 1500) {
+      const wasRunning = running;
+      if (wasRunning) stopMetro();
+      rebuildAudio();
+      if (wasRunning) startMetro();
+    }
     if (ctx.state !== "running") ctx.resume().catch(() => {});
+    checkHealth();
     if (!unlocked) {
       unlocked = true;
       const b = ctx.createBuffer(1, 1, ctx.sampleRate);
@@ -689,12 +719,21 @@
   }
   $$(".tab").forEach((t) => t.addEventListener("click", () => { unlockAudio(); showView(t.dataset.tab, true); }));
 
+  let hiddenAt = 0;
+  function backFromBackground() {
+    setSession("playback");
+    // Nach Hintergrund/Sperrbildschirm die Tonausgabe beim nächsten Tippen frisch starten –
+    // das ist, was Schließen und Öffnen der App bewirkt.
+    if (performance.now() - hiddenAt > 1500 || ctx.state !== "running") { needsRebuild = true; failCount = 0; lastRebuild = -Infinity; }
+  }
+  window.addEventListener("pageshow", (e) => { if (e.persisted) { hiddenAt = 0; backFromBackground(); } });
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
+      hiddenAt = performance.now();
       releaseAll();
       if (micStream) { stopMic(); }
-    } else if (ctx.state === "interrupted" || ctx.state === "closed") {
-      needsRebuild = true;
+    } else {
+      backFromBackground();
     }
     if (!document.hidden && currentView === "stimmgeraet" && !micStream) {
       setStatus("Bereit", "off"); micBtn.textContent = "Mikrofon starten"; micBtn.hidden = false;
