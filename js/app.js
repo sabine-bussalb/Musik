@@ -50,7 +50,7 @@
     master.attack.value = 0.003; master.release.value = 0.25;
     master.connect(ctx.destination);
     pianoBus = ctx.createGain(); pianoBus.gain.value = 0.9; pianoBus.connect(master);
-    metroBus = ctx.createGain(); metroBus.gain.value = 0.9; metroBus.connect(master);
+    metroBus = ctx.createGain(); metroBus.gain.value = 1.0; metroBus.connect(ctx.destination); // am Begrenzer vorbei = lauter
     unlocked = false;
     needsRebuild = false;
     clickBufs = makeClicks(ctx);
@@ -60,15 +60,30 @@
   let clickBufs = null;
   function makeClicks(c) {
     const sr = c.sampleRate;
-    return [[1760, 1.0, 0.075], [1320, 0.75, 0.055], [1000, 0.6, 0.055]].map(([f, peak, len]) => {
-      const n = Math.floor(sr * (len + 0.01));
+    // [Grundton, Lautstärke, Ausklingzeit]: Betonung höher, alle kräftig
+    return [[2000, 1.0, 0.11], [1650, 0.92, 0.09], [1400, 0.88, 0.09]].map(([f, peak, len]) => {
+      const n = Math.floor(sr * (len + 0.02));
       const b = c.createBuffer(1, n, sr);
       const d = b.getChannelData(0);
-      const atk = sr * 0.0015, k = Math.log(peak / 0.0008) / (sr * len);
+      const atk = Math.floor(sr * 0.001);
+      let seed = 12345;
+      const noise = () => { seed = (seed * 16807) % 2147483647; return seed / 1073741823.5 - 1; };
       for (let i = 0; i < n; i++) {
-        const env = i < atk ? (i / atk) * peak : peak * Math.exp(-k * (i - atk));
-        d[i] = Math.sin(2 * Math.PI * f * i / sr) * env;
+        const t = i / sr;
+        // Holzblock-artig: Grundton + Obertöne (2x, 3x, 4,2x), die oberen klingen schneller ab
+        let x = Math.sin(2 * Math.PI * f * t)
+              + 0.6 * Math.sin(2 * Math.PI * f * 2 * t) * Math.exp(-t / (len * 0.35))
+              + 0.35 * Math.sin(2 * Math.PI * f * 3 * t) * Math.exp(-t / (len * 0.2))
+              + 0.25 * Math.sin(2 * Math.PI * f * 4.2 * t) * Math.exp(-t / (len * 0.12));
+        x *= Math.exp(-t / (len * 0.3));
+        x += 0.5 * noise() * Math.exp(-t / 0.002); // kurzer Anschlag
+        d[i] = i < atk ? x * (i / atk) : x;
       }
+      // sanft begrenzen und auf volle Lautstärke bringen
+      let max = 0;
+      for (let i = 0; i < n; i++) { d[i] = Math.tanh(1.6 * d[i]); max = Math.max(max, Math.abs(d[i])); }
+      const g = (peak * 0.98) / max;
+      for (let i = 0; i < n; i++) d[i] *= g;
       return b;
     });
   }

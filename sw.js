@@ -1,5 +1,5 @@
 /* Offline-Cache für Musik */
-const CACHE = "musik-v8";
+const CACHE = "musik-v9";
 const FILES = [
   "./",
   "index.html",
