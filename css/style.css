@@ -37,18 +37,15 @@ body[data-theme="petrol"] {
 
 /* ---------- Grundlayout ---------- */
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-html, body { height: 100%; margin: 0; }
+html, body { height: 100%; margin: 0; overflow: hidden; }
 html { background: var(--bg, #F3EEFB); }
 body {
   font-family: "Inter", -apple-system, system-ui, sans-serif;
   font-feature-settings: "tnum" 1, "cv11" 1;
   background: var(--bg);
   color: var(--ink);
-  position: fixed; top: 0; left: 0; right: 0;
-  /* nur die wirklich sichtbare Höhe nutzen (Safari-Leisten im Hochformat) */
-  height: 100vh;
-  height: 100dvh;
-  height: var(--app-h, 100dvh);
+  position: fixed; inset: 0;
+  height: auto; width: auto;
   overflow: hidden;
   overscroll-behavior: none;
   -webkit-user-select: none; user-select: none;

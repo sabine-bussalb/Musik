@@ -35,18 +35,46 @@
 
   // ---------------------------------------------------------------- Audio
   const AC = window.AudioContext || window.webkitAudioContext;
-  const ctx = new AC({ latencyHint: "interactive" });
   const setSession = (type) => { try { if (navigator.audioSession) navigator.audioSession.type = type; } catch { /* nicht unterstützt */ } };
   setSession("playback");
 
-  const master = ctx.createDynamicsCompressor();
-  master.threshold.value = -10; master.knee.value = 12; master.ratio.value = 4;
-  master.attack.value = 0.003; master.release.value = 0.25;
-  master.connect(ctx.destination);
+  // Wiedergabe (Klavier + Metronom). Das Stimmgerät hat einen eigenen Audio-Kontext,
+  // weil iOS nach Mikrofonbenutzung den Wiedergabe-Kontext sonst oft stumm schaltet.
+  let running = false; // Metronom läuft
+  const voices = new Map(); // Klavier: midi -> {src, gain}
+  let ctx, master, pianoBus, metroBus, unlocked = false, needsRebuild = false;
+  function buildAudio() {
+    ctx = new AC({ latencyHint: "interactive" });
+    master = ctx.createDynamicsCompressor();
+    master.threshold.value = -10; master.knee.value = 12; master.ratio.value = 4;
+    master.attack.value = 0.003; master.release.value = 0.25;
+    master.connect(ctx.destination);
+    pianoBus = ctx.createGain(); pianoBus.gain.value = 0.9; pianoBus.connect(master);
+    metroBus = ctx.createGain(); metroBus.gain.value = 0.9; metroBus.connect(master);
+    unlocked = false;
+    needsRebuild = false;
+  }
+  buildAudio();
 
-  let unlocked = false;
+  function rebuildAudio() {
+    if (typeof stopMetro === "function" && running) stopMetro();
+    voices.clear();
+    const old = ctx;
+    buildAudio();
+    try { old.close(); } catch { /* */ }
+  }
+
+  /** Bei jeder Berührung aufrufen: hält die Tonausgabe am Leben (iOS). */
   function unlockAudio() {
-    if (ctx.state !== "running") ctx.resume().catch(() => {});
+    if (needsRebuild || ctx.state === "closed" || ctx.state === "interrupted") {
+      if (!running) rebuildAudio();
+    }
+    if (ctx.state !== "running") {
+      const c = ctx;
+      c.resume().catch(() => {});
+      // Startet der Kontext nicht, beim nächsten Antippen neu aufbauen
+      setTimeout(() => { if (c === ctx && c.state !== "running" && !document.hidden) needsRebuild = true; }, 600);
+    }
     if (!unlocked) {
       unlocked = true;
       const b = ctx.createBuffer(1, 1, ctx.sampleRate);
@@ -56,8 +84,12 @@
   ["pointerdown", "touchend", "keydown"].forEach((ev) =>
     window.addEventListener(ev, unlockAudio, { capture: true, passive: true }));
 
+  // Eigener Kontext nur zum Dekodieren – unabhängig vom Neuaufbau der Wiedergabe
+  const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  let decoder = null;
+  try { decoder = new OAC(2, 1, 44100); } catch { decoder = null; }
   const decode = (ab) => new Promise((res, rej) => {
-    const p = ctx.decodeAudioData(ab, res, rej);
+    const p = (decoder || ctx).decodeAudioData(ab, res, rej);
     if (p && p.then) p.then(res, rej);
   });
 
@@ -68,7 +100,6 @@
   sampleList.push({ name: "C8", midi: 108 });
 
   const samples = new Map(); // midi -> {buf, offset}
-  const pianoBus = ctx.createGain(); pianoBus.gain.value = 0.9; pianoBus.connect(master);
 
   async function loadSample(s) {
     if (samples.has(s.midi)) return;
@@ -93,7 +124,6 @@
     return bd <= 6 ? best : null;
   }
 
-  const voices = new Map(); // midi -> {src, gain}
   function noteOn(m) {
     noteOff(m, 0.02);
     const t = ctx.currentTime;
@@ -273,7 +303,7 @@
     $("#gauge-zone").setAttribute("d", `M${zx1.toFixed(1)} ${zy1.toFixed(1)} A113 113 0 0 1 ${zx2.toFixed(1)} ${zy2.toFixed(1)}`);
   })();
 
-  let micStream = null, micSource = null, analyser = null, tBuf = null, tunerRAF = 0, micStarting = false;
+  let micCtx = null, micStream = null, micSource = null, analyser = null, tBuf = null, tunerRAF = 0, micStarting = false;
 
   function setStatus(text, cls) {
     if (tStatus.textContent !== text) tStatus.textContent = text;
@@ -290,26 +320,29 @@
     }
     micStarting = true;
     micBtn.hidden = true;
+    // eigener Kontext, im Tipp-Ereignis erzeugt, damit iOS ihn starten lässt
+    if (!micCtx || micCtx.state === "closed") micCtx = new AC();
+    micCtx.resume().catch(() => {});
     setStatus("Mikrofon wird gestartet …", "off");
     try {
       setSession("play-and-record");
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
       });
-      if (currentView !== "stimmgeraet") { stream.getTracks().forEach((t) => t.stop()); setSession("playback"); return; }
+      if (currentView !== "stimmgeraet") { stream.getTracks().forEach((t) => t.stop()); closeMicCtx(); return; }
       micStream = stream;
-      if (ctx.state !== "running") await ctx.resume().catch(() => {});
-      micSource = ctx.createMediaStreamSource(stream);
-      analyser = ctx.createAnalyser();
+      if (micCtx.state !== "running") await micCtx.resume().catch(() => {});
+      micSource = micCtx.createMediaStreamSource(stream);
+      analyser = micCtx.createAnalyser();
       analyser.fftSize = 4096;
       tBuf = new Float32Array(analyser.fftSize);
       micSource.connect(analyser);
       resetTuner();
       setStatus("Spiel einen Ton", "off");
       tunerRAF = requestAnimationFrame(tunerLoop);
-      if (ctx.state !== "running") { micBtn.hidden = false; micBtn.textContent = "Zum Starten tippen"; }
+      if (micCtx.state !== "running") { micBtn.hidden = false; micBtn.textContent = "Zum Starten tippen"; }
     } catch (err) {
-      setSession("playback");
+      closeMicCtx();
       const denied = err && (err.name === "NotAllowedError" || err.name === "SecurityError");
       setStatus(denied ? "Kein Zugriff aufs Mikrofon" : "Mikrofon nicht verfügbar", "off");
       micBtn.textContent = "Mikrofon starten";
@@ -321,12 +354,22 @@
   function stopMic() {
     cancelAnimationFrame(tunerRAF); tunerRAF = 0;
     if (micSource) { try { micSource.disconnect(); } catch { /* */ } micSource = null; }
-    if (micStream) { micStream.getTracks().forEach((t) => t.stop()); micStream = null; setSession("playback"); }
+    if (micStream) { micStream.getTracks().forEach((t) => t.stop()); micStream = null; }
     analyser = null;
+    closeMicCtx();
+  }
+  function closeMicCtx() {
+    if (micCtx) {
+      try { micCtx.close(); } catch { /* */ }
+      micCtx = null;
+      setSession("playback");
+      // iOS hat die Tonausgabe umgestellt – Wiedergabe beim nächsten Antippen frisch aufbauen
+      needsRebuild = true;
+    }
   }
   micBtn.addEventListener("click", () => {
     unlockAudio();
-    if (micStream) { micBtn.hidden = true; return; }
+    if (micStream) { micCtx && micCtx.resume().catch(() => {}); micBtn.hidden = true; return; }
     startMic();
   });
 
@@ -406,14 +449,14 @@
 
   function tunerLoop(now) {
     tunerRAF = requestAnimationFrame(tunerLoop);
-    if (!analyser) return;
+    if (!analyser || !micCtx) return;
     const dt = Math.min(0.05, lastFrame ? (now - lastFrame) / 1000 : 0.016);
     lastFrame = now;
 
     if (now - lastDetect >= 30) {
       lastDetect = now;
       analyser.getFloatTimeDomainData(tBuf);
-      const f = detectPitch(tBuf, ctx.sampleRate);
+      const f = detectPitch(tBuf, micCtx.sampleRate);
       if (f > 0) feed(f, now);
     }
 
@@ -461,8 +504,7 @@
   const ssBtn = $("#startstop"), ssLabel = $("#startstop-label");
   let bpm = clamp(store.get("bpm", 100), 30, 240);
   let meter = [2, 3, 4, 6].includes(store.get("meter", 4)) ? store.get("meter", 4) : 4;
-  let running = false, nextTime = 0, beat = 0, queue = [], metroRAF = 0, resetBeat = false;
-  const metroBus = ctx.createGain(); metroBus.gain.value = 0.9; metroBus.connect(master);
+  let nextTime = 0, beat = 0, queue = [], metroRAF = 0, resetBeat = false;
 
   const TEMPI = [[59, "Largo"], [65, "Larghetto"], [75, "Adagio"], [107, "Andante"], [119, "Moderato"], [155, "Allegro"], [175, "Vivace"], [240, "Presto"]];
   const tempoName = (b) => TEMPI.find(([max]) => b <= max)[1];
@@ -630,25 +672,27 @@
     if (document.hidden) {
       releaseAll();
       if (micStream) { stopMic(); }
-    } else if (currentView === "stimmgeraet" && !micStream) {
+    } else if (ctx.state === "interrupted" || ctx.state === "closed") {
+      needsRebuild = true;
+    }
+    if (!document.hidden && currentView === "stimmgeraet" && !micStream) {
       setStatus("Bereit", "off"); micBtn.textContent = "Mikrofon starten"; micBtn.hidden = false;
     }
   });
 
   showView(store.get("tab", "klavier"), false);
 
-  // ================================================================ HÖHE
-  // Safari zeigt im Hochformat unten eine Leiste – die App passt sich der sichtbaren Höhe an,
-  // damit die Knöpfe unten immer sichtbar und antippbar bleiben.
-  function fitHeight() {
-    const h = Math.round(window.visualViewport ? Math.min(window.visualViewport.height, window.innerHeight) : window.innerHeight);
-    if (h > 0) document.documentElement.style.setProperty("--app-h", h + "px");
-    window.scrollTo(0, 0);
+  // ================================================================ DREHEN
+  // Beim Drehen hängende Tasten lösen und eine evtl. iOS-Vergrößerung zurücksetzen
+  const vpMeta = $('meta[name="viewport"]');
+  const VP = vpMeta.getAttribute("content");
+  function onRotate() {
+    releaseAll();
+    vpMeta.setAttribute("content", VP + ", minimum-scale=1");
+    setTimeout(() => { vpMeta.setAttribute("content", VP); window.scrollTo(0, 0); }, 50);
   }
-  fitHeight();
-  window.addEventListener("resize", fitHeight);
-  window.addEventListener("orientationchange", () => { fitHeight(); setTimeout(fitHeight, 300); setTimeout(fitHeight, 800); });
-  if (window.visualViewport) window.visualViewport.addEventListener("resize", fitHeight);
+  window.addEventListener("orientationchange", onRotate);
+  if (screen.orientation) screen.orientation.addEventListener("change", onRotate);
 
   // ================================================================ OFFLINE
   if ("serviceWorker" in navigator && location.protocol !== "file:") {
