@@ -16,9 +16,9 @@
 }
 body[data-theme="blau"] {
   --bg: #E7F1FB;
-  --btn: #CCE0F5;
-  --btn-press: #B7D2EF;
-  --accent: #1E4A8A;
+  --btn: #A9C7EB;
+  --btn-press: #93B8E3;
+  --accent: #163C74;
   --accent-ink: #ffffff;
   --ink: #142B4A;
   --muted: #4D6584;
@@ -209,8 +209,8 @@ body.names-off .key .label { visibility: hidden; }
 .tuner.ok .needle-hub { fill: var(--ok); }
 .tuner.warn .needle line { stroke: var(--warn); }
 .tuner.warn .needle-hub { fill: var(--warn); }
-.tuner.off .needle line { stroke: var(--line); }
-.tuner.off .needle-hub { fill: var(--line); }
+.tuner.off .needle line { stroke: var(--accent); }
+.tuner.off .needle-hub { fill: var(--accent); }
 
 .tuner-info { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; }
 .tuner-note { font-size: clamp(72px, 22vw, 120px); font-weight: 700; line-height: 1; letter-spacing: -.02em; color: var(--ink); transition: color .3s ease, opacity .3s ease; }
